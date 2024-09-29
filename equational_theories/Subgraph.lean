@@ -369,11 +369,11 @@ theorem Equation43_not_implies_Equation3 : ∃ (G: Type) (_: Magma G), Equation4
   specialize h 1
   simp [hG] at h
 
-theorem Equation43_not_implies_Equation39 : ∃ (G: Type) (_: Magma G), Equation43 G ∧ ¬ Equation3 G := by
+theorem Equation43_not_implies_Equation39 : ∃ (G: Type) (_: Magma G), Equation43 G ∧ ¬ Equation39 G := by
   let hG : Magma ℕ := { op := fun x y ↦ x+y }
   refine ⟨ℕ, hG, fun _ _ ↦ Nat.add_comm _ _, ?_⟩
   by_contra h
-  specialize h 1
+  specialize h 0 1
   simp [hG] at h
 
 theorem Equation43_not_implies_Equation42 : ∃ (G: Type) (_: Magma G), Equation43 G ∧ ¬ Equation42 G := by
