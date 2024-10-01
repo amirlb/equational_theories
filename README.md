@@ -1,10 +1,10 @@
 ## Lists on unknown implications
 
-These files exist in this directory:
+These files appear in `results.zip`:
 
 * `all_unknown.txt` - all the implications that are as yet undecided
 
-* `components.txt` - known equivalence classes of implications, one per line
+* `components.txt` - known equivalence classes of equations, one per line
 
 * `modulo_equivalence.txt` - only a single unknown implication per pair of equivalence classes
 
