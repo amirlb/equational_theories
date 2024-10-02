@@ -6,7 +6,7 @@ import equational_theories.Closure
 
 open Lean Core Elab Cli
 
-def withExtractedResults (imp : Cli.Parsed) (action : Array Entry → IO UInt32) : IO UInt32 := do
+def withExtractedResults (imp : Cli.Parsed) (action : Array Entry → IO Unit) : IO UInt32 := do
   let mut some modules := imp.variableArgsAs? ModuleName |
     imp.printHelp
     return 1
@@ -20,19 +20,18 @@ def withExtractedResults (imp : Cli.Parsed) (action : Array Entry → IO UInt32)
     Prod.fst <$> (Meta.MetaM.toIO · ctx state) do
       let rs ← Result.extractEquationalResults
       action rs
+      pure 0
 
 def generateUnknowns (inp : Cli.Parsed) : IO UInt32 := do
   withExtractedResults inp fun rs => do
-    let rs' := if inp.hasFlag "proven" then rs.filter (·.proven) else rs
-    let rs' := rs'.map (·.variant)
-    let (equations, outcomes) := Closure.outcomes_mod_equiv rs'
+    let rs := if inp.hasFlag "proven" then rs.filter (·.proven) else rs
+    let (equations, outcomes) := Closure.outcomes_mod_equiv rs
     let mut unknowns : Array Implication := #[]
     for i in [:equations.size] do
       for j in [:equations.size] do
         if outcomes[i]![j]!.isNone then
           unknowns := unknowns.push ⟨equations[i]!, equations[j]!⟩
     IO.println (toJson unknowns).compress
-    pure 0
 
 def unknowns : Cmd := `[Cli|
   unknowns VIA generateUnknowns;
@@ -49,6 +48,12 @@ def unknowns : Cmd := `[Cli|
 structure Output where
   implications : Array Implication
   nonimplications : Array Implication
+
+--- Output of the extract_implications stats subcommand.
+structure OutputStats where
+  equations : Std.HashMap Closure.Outcome Nat
+  num_classes : Nat
+  equiv_classes : Std.HashMap (Option Bool) Nat
 
 --- Output of the extract_implications outcomes subcommand.
 structure OutputOutcomes where
@@ -71,28 +76,44 @@ def Output.asJson (v : Output) : String :=
 def generateOutcomes (inp : Cli.Parsed) : IO UInt32 := do
   withExtractedResults inp fun rs => do
     let (equations, outcomes) := Closure.list_outcomes rs
-    if inp.hasFlag "hist" then
-      let mut count : Std.HashMap Closure.Outcome Nat := {}
-      for a in outcomes do
-        for b in a do
-          count := count.insert b (count.getD b 0 + 1)
-      IO.print "{"
-      let mut first := true
-      for ⟨a, b⟩ in count do
-        if !first then IO.print ",\n"
-        IO.print f!"{a}: {b}"
-        first := false
-      IO.println "\n}"
-    else
-      IO.println (toJson ({equations, outcomes : OutputOutcomes})).compress
-    pure 0
+    IO.println (toJson ({equations, outcomes : OutputOutcomes})).compress
 
 def outcomes : Cmd := `[Cli|
   outcomes VIA generateOutcomes;
   "Output the status of all implications."
 
-  FLAGS:
-    hist; "Create a histogram instead of outputting all outcomes"
+  ARGS:
+    ...files : Array ModuleName; "The files to extract the implications from"
+]
+
+instance : ToJson OutputStats where
+  toJson stats :=
+    let eq_stats := stats.equations.toList.map fun ⟨outcome, cnt⟩ => (toString outcome, toJson cnt)
+    let class_stats := stats.equiv_classes.toList.map fun ⟨outcome, cnt⟩ => (outcome.elim "unknown" toString, toJson cnt)
+    let class_stats := ("num_classes", toJson stats.num_classes) :: class_stats
+    Json.mkObj [
+      ("equations", Json.mkObj eq_stats),
+      ("equiv_classes", Json.mkObj class_stats)
+    ]
+
+def generateStats (inp : Cli.Parsed) : IO UInt32 := do
+  withExtractedResults inp fun rs => do
+    let (_, outcomes) := Closure.list_outcomes rs
+    let mut equations : Std.HashMap Closure.Outcome Nat := {}
+    for a in outcomes do
+      for b in a do
+        equations := equations.insert b (equations.getD b 0 + 1)
+    let (_, outcomes) := Closure.outcomes_mod_equiv rs
+    let mut equiv_classes : Std.HashMap (Option Bool) Nat := {}
+    for a in outcomes do
+      for b in a do
+        equiv_classes := equiv_classes.insert b (equiv_classes.getD b 0 + 1)
+    let stats : OutputStats := ⟨equations, outcomes.size, equiv_classes⟩
+    IO.println (toJson stats).pretty
+
+def stats : Cmd := `[Cli|
+  stats VIA generateStats;
+  "Output statistics about proven, conjectured, and unknown implications."
 
   ARGS:
     ...files : Array ModuleName; "The files to extract the implications from"
@@ -115,7 +136,6 @@ def generateOutput (inp : Cli.Parsed) : IO UInt32 := do
         for edge in rs do
           if edge.isTrue then IO.println s!"{edge.lhs} → {edge.rhs}"
           else IO.println s!"¬ ({edge.lhs} → {edge.rhs})"
-      pure 0
 
 def generateRaw (inp : Cli.Parsed) : IO UInt32 := do
   withExtractedResults inp fun rs => do
@@ -130,7 +150,6 @@ def generateRaw (inp : Cli.Parsed) : IO UInt32 := do
       | .unconditional s => unconditionals := unconditionals.push s
     let output : OutputRaw := ⟨implications, facts, unconditionals⟩
     IO.println (toJson output).pretty
-    pure 0
 
 def raw : Cmd := `[Cli|
   raw VIA generateRaw;
@@ -156,7 +175,7 @@ def extract_implications : Cmd := `[Cli|
   ARGS:
     ...files : Array ModuleName; "The files to extract the implications from"
 
-  SUBCOMMANDS: outcomes; unknowns; raw
+  SUBCOMMANDS: outcomes; stats; unknowns; raw
 ]
 
 def main (args : List String) : IO UInt32 := do

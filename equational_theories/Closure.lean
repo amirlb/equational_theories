@@ -45,15 +45,15 @@ instance : Inhabited Outcome where
 
 instance : ToString Outcome where
   toString
-  | .unknown => "\"unknown\""
-  | .explicit_proof_true => "\"explicit_proof_true\""
-  | .implicit_proof_true => "\"implicit_proof_true\""
-  | .explicit_proof_false => "\"explicit_proof_false\""
-  | .implicit_proof_false => "\"implicit_proof_false\""
-  | .explicit_conjecture_true => "\"explicit_conjecture_true\""
-  | .implicit_conjecture_true => "\"implicit_conjecture_true\""
-  | .explicit_conjecture_false => "\"explicit_conjecture_false\""
-  | .implicit_conjecture_false => "\"implicit_conjecture_false\""
+  | .unknown => "unknown"
+  | .explicit_proof_true => "explicit_proof_true"
+  | .implicit_proof_true => "implicit_proof_true"
+  | .explicit_proof_false => "explicit_proof_false"
+  | .implicit_proof_false => "implicit_proof_false"
+  | .explicit_conjecture_true => "explicit_conjecture_true"
+  | .implicit_conjecture_true => "implicit_conjecture_true"
+  | .explicit_conjecture_false => "explicit_conjecture_false"
+  | .implicit_conjecture_false => "implicit_conjecture_false"
 
 def Outcome.implicit_theorem : Bool → Outcome
   | true => implicit_proof_true
@@ -320,7 +320,8 @@ def list_outcomes (res : Array Entry) : Array String × Array (Array Outcome) :=
 
   return (eqs_order, outcomes)
 
-def outcomes_mod_equiv (inp : Array EntryVariant) : Array String × Array (Array (Option Bool)) := Id.run do
+def outcomes_mod_equiv (inp : Array Entry) : Array String × Array (Array (Option Bool)) := Id.run do
+  let inp := inp.map (·.variant)
   let (eqs, eqs_order) := number_equations inp
   let n := eqs.size
   let reachable := closure_aux inp eqs

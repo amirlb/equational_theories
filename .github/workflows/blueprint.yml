@@ -110,8 +110,8 @@ jobs:
 
       - name: Generate home_page/dashboard.md
         run: |
-          ~/.elan/bin/lake exe extract_implications outcomes equational_theories --hist > /tmp/hist.json
-          python scripts/generate_dashboard.py /tmp/hist.json
+          ~/.elan/bin/lake exe extract_implications stats equational_theories > /tmp/stats.json
+          python scripts/generate_dashboard.py /tmp/stats.json
 
       - name: Bundle dependencies
         if: github.event_name == 'push'
