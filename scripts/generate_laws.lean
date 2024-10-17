@@ -28,14 +28,6 @@ def shapesOfOrder : ℕ → Array Shape
 -- theorem set_treesOfNumNodesEq (n : ℕ) : (treesOfNumNodesEq_fromShapes n = Tree.treesOfNumNodesEq n) :=
 --   sorry
 
-def Tree.comp {α : Type} [Ord α] (s1 s2 : Tree α) : Ordering :=
-  match s1, s2 with
-  | .nil,          .nil          => .eq
-  | .nil,          .node _ _ _   => .lt
-  | .node _ _ _,   .nil          => .gt
-  | .node x l1 r1, .node y l2 r2 =>
-    compare x y |>.then (l1.comp l2) |>.then (r1.comp r2)
-
 def FreeMagma.comp (m1 m2 : FreeMagma ℕ) : Ordering :=
   match m1, m2 with
     | .Leaf n,     .Leaf m     => compare n m
