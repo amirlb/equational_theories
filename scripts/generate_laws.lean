@@ -35,12 +35,14 @@ def subst (law : NatMagmaLaw) (vars : List ℕ) : NatMagmaLaw :=
   let aux := fmapFreeMagma (vars.get! ·)
   ⟨aux law.lhs, aux law.rhs⟩
 
-local instance : Magma ℕ where
-  op := max
+structure MaxNat where val : ℕ
+
+instance : Magma MaxNat where
+  op x y := ⟨max x.val y.val⟩
 
 def lastVar (law : NatMagmaLaw) : ℕ :=
-  let aux := evalInMagma (· + 1)
-  max (aux law.lhs) (aux law.rhs)
+  let exprLastVar expr := (evalInMagma MaxNat.mk expr).val
+  max (exprLastVar law.lhs) (exprLastVar law.rhs)
 
 def equivalentLaws (law : NatMagmaLaw) : Array NatMagmaLaw :=
   let vars := List.range (lastVar law + 1)
