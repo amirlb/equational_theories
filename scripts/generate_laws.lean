@@ -28,28 +28,50 @@ def shapesOfOrder : ℕ → Array Shape
 -- theorem set_treesOfNumNodesEq (n : ℕ) : (treesOfNumNodesEq_fromShapes n = Tree.treesOfNumNodesEq n) :=
 --   sorry
 
-open Law
-open FreeMagma
+def Tree.comp {α : Type} [Ord α] (s1 s2 : Tree α) : Ordering :=
+  match s1, s2 with
+  | .nil,          .nil          => .eq
+  | .nil,          .node _ _ _   => .lt
+  | .node _ _ _,   .nil          => .gt
+  | .node x l1 r1, .node y l2 r2 =>
+    compare x y |>.then (l1.comp l2) |>.then (r1.comp r2)
 
-def subst (law : NatMagmaLaw) (vars : List ℕ) : NatMagmaLaw :=
-  let aux := fmapFreeMagma (vars.get! ·)
-  ⟨aux law.lhs, aux law.rhs⟩
+def FreeMagma.comp (m1 m2 : FreeMagma ℕ) : Ordering :=
+  match m1, m2 with
+    | .Leaf n,     .Leaf m     => compare n m
+    | .Leaf _,     .Fork _ _   => .lt
+    | .Fork _ _,   .Leaf _     => .gt
+    | .Fork l1 r1, .Fork l2 r2 => (l1.comp l2).then (r1.comp r2)
 
-structure MaxNat where val : ℕ
+def Law.MagmaLaw.comp (l1 l2 : Law.NatMagmaLaw) : Ordering :=
+  (FreeMagma.comp l1.lhs l2.lhs).then (FreeMagma.comp l1.rhs l2.rhs)
 
-instance : Magma MaxNat where
-  op x y := ⟨max x.val y.val⟩
+-- Canonically reorders variables
+def FreeMagma.canonicalize (m : FreeMagma ℕ) : FreeMagma ℕ :=
+  ((go m).run' #[]).run
+where
+  go : FreeMagma ℕ → StateM (Array ℕ) (FreeMagma ℕ)
+  | .Leaf v =>   do pure <| .Leaf (← getInd v)
+  | .Fork l r => do pure <| .Fork (← go l) (← go r)
 
-def lastVar (law : NatMagmaLaw) : ℕ :=
-  let exprLastVar expr := (evalInMagma MaxNat.mk expr).val
-  max (exprLastVar law.lhs) (exprLastVar law.rhs)
+  getInd (n : ℕ) : StateM (Array ℕ) ℕ := do
+    let xs ← get
+    match xs.indexOf? n with
+    | some i => return i
+    | none =>
+      set (xs.push n)
+      return xs.size
 
-def equivalentLaws (law : NatMagmaLaw) : Array NatMagmaLaw :=
-  let vars := List.range (lastVar law + 1)
-  let renamings := (List.permutations vars).toArray.map (subst law)
-  renamings ++ renamings.map (·.symm)
+def Law.MagmaLaw.canonicalize (l : Law.NatMagmaLaw) : Law.NatMagmaLaw :=
+  (go.run' #[]).run
+where
+  go : StateM (Array ℕ) Law.NatMagmaLaw := do
+    let lhs' ← FreeMagma.canonicalize.go l.lhs
+    let rhs' ← FreeMagma.canonicalize.go l.rhs
+    return ⟨lhs', rhs'⟩
 
--- TODO: theorem that shows that these laws really are equivalent
+def Law.MagmaLaw.is_canonical (law : Law.MagmaLaw Nat) : Bool :=
+  law.symm.canonicalize.comp law ≠ .lt
 
 -- We care about the order of the results so we can't use a standard non-determinism monad
 def VarAllocM (α : Type) := ℕ → Array (α × ℕ)
@@ -64,6 +86,9 @@ def VarAllocM.run {α : Type} (a : VarAllocM α) (nextVar : ℕ) : Array (α × 
 def VarAllocM.run' {α : Type} (a : VarAllocM α) (nextVar : ℕ) : Array α :=
   (a.run nextVar).map (·.1)
 
+def nothing {α : Type} : VarAllocM α :=
+  λ _ => #[]
+
 def availableVars : VarAllocM ℕ :=
   λ nextVar => List.range (nextVar + 1) |>.toArray.map λ var => (var, max (var + 1) nextVar)
 
@@ -75,34 +100,29 @@ def exprsWithShape : Shape → VarAllocM (FreeMagma ℕ)
 
 -- TODO: develop the theory of Bell numbers and show that it counts the expressions above
 
-def lawsWithShape : Shape → Array NatMagmaLaw
+def lawsWithShape : Shape → Array Law.NatMagmaLaw
   | .nil => unreachable!
   | .node _ lhs rhs =>
-    let m := do pure <| MagmaLaw.mk (← exprsWithShape lhs) (← exprsWithShape rhs)
-    m.run' 0
+    (go lhs rhs).run' 0 |>.filter (·.is_canonical)
+where
+  go (lhs rhs : Tree Unit) : VarAllocM Law.NatMagmaLaw :=
+    do pure ⟨← exprsWithShape lhs, ← exprsWithShape rhs⟩
 
-local instance : Hashable NatMagmaLaw where
-  hash law := hash (toString law)  -- Yuck
-
-def lawsOfOrder (order : ℕ) (includeRedundantTrivialLaws := false) : Array NatMagmaLaw := Id.run do
+def lawsOfOrder (order : ℕ) (includeRedundantTrivialLaws := false) : Array Law.NatMagmaLaw := Id.run do
   let mut laws := #[]
-  let mut lawsSet : Std.HashSet NatMagmaLaw := {}
   for shape in shapesOfOrder (order + 1) do
     for law in lawsWithShape shape do
       if ¬includeRedundantTrivialLaws ∧ order > 0 ∧ law.lhs == law.rhs then
         continue
-      let equivalents := equivalentLaws law
-      if equivalents.all (¬lawsSet.contains ·) then
-        laws := laws.push law
-        lawsSet := lawsSet.insert law
+      laws := laws.push law
   pure laws
 
 -- TODO: theorem that shows that this list includes an equivalent for each law of that order
 
-def listLawsUpToOrder (maxOrder : ℕ) : Array NatMagmaLaw :=
+def listLawsUpToOrder (maxOrder : ℕ) : Array Law.NatMagmaLaw :=
   List.range (maxOrder + 1) |>.toArray.map lawsOfOrder |>.flatten
 
-def maxOrder : Nat := 4
+def maxOrder : ℕ := 4
 
 def main : IO Unit := do
   -- for order in List.range (maxOrder + 1) do
