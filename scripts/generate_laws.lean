@@ -3,16 +3,14 @@ import Mathlib.Data.Tree.Basic
 import equational_theories.FreeMagma
 import equational_theories.MagmaLaw
 
-def Shape := Tree Unit
-
-def formatShape : Shape → String
+def formatShape : Tree Unit → String
   | .nil => "·"
   | .node _ lhs rhs => s!"({formatShape lhs} ◇ {formatShape rhs})"
 
 def productWith {α β γ : Type} (xs : Array α) (ys : Array β) (f : α → β → γ) : Array γ :=
   xs.map (λ x => ys.map (f x)) |>.flatten
 
-def shapesOfOrder : ℕ → Array Shape
+def shapesOfOrder : ℕ → Array (Tree Unit)
   | 0 => #[.nil]
   | numNodes =>
     let smaller := List.finRange numNodes |>.toArray.map (shapesOfOrder ·.val)
@@ -28,14 +26,14 @@ def shapesOfOrder : ℕ → Array Shape
 -- theorem set_treesOfNumNodesEq (n : ℕ) : (treesOfNumNodesEq_fromShapes n = Tree.treesOfNumNodesEq n) :=
 --   sorry
 
-def FreeMagma.comp (m1 m2 : FreeMagma ℕ) : Ordering :=
+def FreeMagma.comp {α : Type} [Ord α] (m1 m2 : FreeMagma α) : Ordering :=
   match m1, m2 with
     | .Leaf n,     .Leaf m     => compare n m
     | .Leaf _,     .Fork _ _   => .lt
     | .Fork _ _,   .Leaf _     => .gt
     | .Fork l1 r1, .Fork l2 r2 => (l1.comp l2).then (r1.comp r2)
 
-def Law.MagmaLaw.comp (l1 l2 : Law.NatMagmaLaw) : Ordering :=
+def Law.MagmaLaw.comp {α : Type} [Ord α] (l1 l2 : Law.MagmaLaw α) : Ordering :=
   (FreeMagma.comp l1.lhs l2.lhs).then (FreeMagma.comp l1.rhs l2.rhs)
 
 -- Canonically reorders variables
@@ -84,15 +82,13 @@ def nothing {α : Type} : VarAllocM α :=
 def availableVars : VarAllocM ℕ :=
   λ nextVar => List.range (nextVar + 1) |>.toArray.map λ var => (var, max (var + 1) nextVar)
 
-def exprsWithShape : Shape → VarAllocM (FreeMagma ℕ)
-  | .nil =>
-    do pure <| .Leaf (← availableVars)
-  | .node _ lhs rhs =>
-    do pure <| .Fork (← exprsWithShape lhs) (← exprsWithShape rhs)
+def exprsWithShape : Tree Unit → VarAllocM (FreeMagma ℕ)
+  | .nil =>            do pure <| .Leaf (← availableVars)
+  | .node _ lhs rhs => do pure <| .Fork (← exprsWithShape lhs) (← exprsWithShape rhs)
 
 -- TODO: develop the theory of Bell numbers and show that it counts the expressions above
 
-def lawsWithShape : Shape → Array Law.NatMagmaLaw
+def lawsWithShape : Tree Unit → Array Law.NatMagmaLaw
   | .nil => unreachable!
   | .node _ lhs rhs =>
     (go lhs rhs).run' 0 |>.filter (·.is_canonical)
