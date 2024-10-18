@@ -4,26 +4,20 @@ import equational_theories.FreeMagma
 import equational_theories.MagmaLaw
 
 def formatShape : Tree Unit → String
-  | .nil => "·"
+  | .nil => "_"
   | .node _ lhs rhs => s!"({formatShape lhs} ◇ {formatShape rhs})"
 
-def productWith {α β γ : Type} (xs : Array α) (ys : Array β) (f : α → β → γ) : Array γ :=
-  xs.map (λ x => ys.map (f x)) |>.flatten
-
-def shapesOfOrder : ℕ → Array (Tree Unit)
-  | 0 => #[.nil]
+def shapesOfOrder : ℕ → List (Tree Unit)
+  | 0 => [.nil]
   | numNodes =>
-    let smaller := List.finRange numNodes |>.toArray.map (shapesOfOrder ·.val)
-    Array.zipWith smaller smaller.reverse
-      (λ lhs rhs => productWith lhs rhs (.node ()))
-    |>.flatten
+    let smaller := List.finRange numNodes |>.map (shapesOfOrder ·.val)
+    List.zip smaller smaller.reverse
+    |>.bind λ (lhs, rhs) => lhs.bind λ l => rhs.map λ r => .node () l r
 
 -- Connect to the Mathlib theory on cartesian trees
 -- import Mathlib.Combinatorics.Enumerative.Catalan
--- def treesOfNumNodesEq_fromShapes (n : ℕ) : Finset (Tree Unit) :=
---   let trees : Array (Tree Unit) := shapesOfOrder n
---   trees.toList.toFinset
--- theorem set_treesOfNumNodesEq (n : ℕ) : (treesOfNumNodesEq_fromShapes n = Tree.treesOfNumNodesEq n) :=
+-- theorem set_treesOfNumNodesEq (n : ℕ) :
+--   (shapesOfOrder n).toFinset = Tree.treesOfNumNodesEq n :=
 --   sorry
 
 def FreeMagma.comp {α : Type} [Ord α] (m1 m2 : FreeMagma α) : Ordering :=
@@ -52,15 +46,14 @@ where
       set (xs.push n)
       return xs.size
 
-def Law.MagmaLaw.canonicalize (l : Law.NatMagmaLaw) : Law.NatMagmaLaw :=
+def Law.MagmaLaw.canonicalize (law : Law.NatMagmaLaw) : Law.NatMagmaLaw :=
   (go.run' #[]).run
 where
-  go : StateM (Array ℕ) Law.NatMagmaLaw := do
-    let lhs' ← FreeMagma.canonicalize.go l.lhs
-    let rhs' ← FreeMagma.canonicalize.go l.rhs
-    return ⟨lhs', rhs'⟩
+  go : StateM (Array ℕ) Law.NatMagmaLaw :=
+    do pure ⟨← FreeMagma.canonicalize.go law.lhs,
+             ← FreeMagma.canonicalize.go law.rhs⟩
 
-def Law.MagmaLaw.is_canonical (law : Law.MagmaLaw Nat) : Bool :=
+def Law.MagmaLaw.isBeforeSymm (law : Law.MagmaLaw Nat) : Bool :=
   law.symm.canonicalize.comp law ≠ .lt
 
 -- We care about the order of the results so we can't use a standard non-determinism monad
@@ -88,18 +81,16 @@ def exprsWithShape : Tree Unit → VarAllocM (FreeMagma ℕ)
 
 -- TODO: develop the theory of Bell numbers and show that it counts the expressions above
 
-def lawsWithShape : Tree Unit → Array Law.NatMagmaLaw
-  | .nil => unreachable!
-  | .node _ lhs rhs =>
-    (go lhs rhs).run' 0 |>.filter (·.is_canonical)
+def lawsWithShape (shape : Tree Unit) (_ : shape ≠ .nil) : Array Law.NatMagmaLaw :=
+  go.run' 0 |>.filter (·.isBeforeSymm)
 where
-  go (lhs rhs : Tree Unit) : VarAllocM Law.NatMagmaLaw :=
-    do pure ⟨← exprsWithShape lhs, ← exprsWithShape rhs⟩
+  go : VarAllocM Law.NatMagmaLaw := match shape with
+    | .node _ lhs rhs => do pure ⟨← exprsWithShape lhs, ← exprsWithShape rhs⟩
 
 def lawsOfOrder (order : ℕ) (includeRedundantTrivialLaws := false) : Array Law.NatMagmaLaw := Id.run do
   let mut laws := #[]
   for shape in shapesOfOrder (order + 1) do
-    for law in lawsWithShape shape do
+    for law in lawsWithShape shape (sorry : shape ≠ .nil) do
       if ¬includeRedundantTrivialLaws ∧ order > 0 ∧ law.lhs == law.rhs then
         continue
       laws := laws.push law
