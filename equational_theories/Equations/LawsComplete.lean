@@ -166,44 +166,90 @@ The proofs are rather unpretty; maybe phrasing everything in terms of `Decidable
 have made that easier. But what works works.
 -/
 
-def testNat : Nat → (P : Nat → Bool) → Bool
-  | 0, _   => true
-  | n+1, P => P n && testNat n P
+class Collection (α : Type) where
+  empty : α
+  concat : α → α → α
 
-def testAllSplits (s : Nat) (P : Nat → Nat → Bool) : Bool :=
-  testNat (s+1) fun s' => P s' (s-s')
+instance {α : Type} [Collection α] : Inhabited α where
+  default := Collection.empty
+
+def Iterator (α : Type) := ∀ {β : Type} [Collection β], (α → β) → β
+
+def empty {α : Type} : Iterator α :=
+  λ _ => Collection.empty
+
+def one {α : Type} (a : α) : Iterator α :=
+  (· a)
+
+def concat {α : Type} (i j : Iterator α) : Iterator α :=
+  λ f => Collection.concat (i f) (j f)
+
+instance : Collection Bool where
+  empty := true
+  concat := (· && ·)
+
+instance {α : Type} : Collection (List α) where
+  empty := []
+  concat := List.append
+
+def iterNat : Nat → Iterator Nat
+  | 0   => empty
+  | n+1 => concat (iterNat n) (one n)
+
+def iterAllSplits (s : Nat) : Iterator (Nat × Nat) :=
+  λ P => iterNat (s+1) fun s' => P (s', s-s')
+
+def iterFreeMagmas (s n : Nat) : Iterator (Nat × FreeMagma Nat) := λ P =>
+  match s with
+  | 0 =>
+    iterNat (n+1) fun i =>
+      P (if i < n then n else n+1, .Leaf i)
+  | s+1 =>
+    iterAllSplits s fun (s1, s2) =>
+      assert! s1 + s2 = s -- Cunning trick to ensure termination!
+      iterFreeMagmas s1 n fun (n', l) =>
+        iterFreeMagmas s2 n' fun (n'', r) =>
+          P (n'', .Fork l r)
 
 def testFreeMagmas (s n : Nat) (P : Nat → FreeMagma Nat → Bool) :=
   match s with
   | 0 =>
-    testNat (n+1) fun i =>
+    iterNat (n+1) fun i =>
       P (if i < n then n else n+1) (.Leaf i)
   | s+1 =>
-    testAllSplits s fun s1 s2 =>
+    iterAllSplits s fun (s1, s2) =>
       assert! s1 + s2 = s -- Cunning trick to ensure termination!
       testFreeMagmas s1 n fun n' l =>
         testFreeMagmas s2 n' fun n'' r =>
           P n'' (.Fork l r)
 
-def testLaws (s : Nat) (P : Law.NatMagmaLaw → Bool) :=
-  testAllSplits s fun s1 s2 =>
-    testFreeMagmas s1 0 fun n' l =>
-      testFreeMagmas s2 n' fun _ r =>
-        if l = .Leaf 0 || l.comp r = .lt then
-          let law := ⟨l, r⟩
-          if law.symm.canonicalize.comp law = .lt then
-            true
+def iterLaws (s : Nat) : Iterator Law.NatMagmaLaw := λ P =>
+  iterAllSplits s fun (s1, s2) =>
+    iterFreeMagmas s1 0 fun (n', l) =>
+      iterFreeMagmas s2 n' fun (_, r) =>
+        if l = FreeMagma.Leaf 0 || l.comp r = Ordering.lt then
+          let law : Law.NatMagmaLaw := ⟨l, r⟩
+          if law.symm.canonicalize.comp law = Ordering.lt then
+            Collection.empty
           else
             P law
         else
-          true
+          Collection.empty
+
+def testLaws (s : Nat) (P : Law.NatMagmaLaw → Bool) : Bool :=
+  iterLaws s P
+
+def iterLawsUpto (s : Nat) : Iterator Law.NatMagmaLaw := λ P =>
+  iterNat (s+1) fun s' => iterLaws s' P
 
 def testLawsUpto (s : Nat) (P : Law.NatMagmaLaw → Bool) :=
-  testNat (s+1) fun s' => testLaws s' P
+  iterLawsUpto s P
 
 /-- info: true -/
 #guard_msgs in
 #eval testLaws 2 (fun l => l.forks = 2 ∧ l.is_canonical)
+
+#eval iterLawsUpto 3 ([·])
 
 /-- info: true -/
 #guard_msgs in
@@ -224,22 +270,22 @@ theorem FreeMagmas.forks_eq_succ_iff (m : FreeMagma Nat) n :
     · intro h; use l, r
     · rintro ⟨_, _, ⟨rfl, rfl⟩, _⟩; assumption
 
-theorem testNat_spec (n : Nat) P :
-    testNat n P = true ↔ ∀ i < n, P i := by
+theorem iterNat_spec (n : Nat) P :
+    iterNat n P = true ↔ ∀ i < n, P i := by
   induction n
-  next => simp [testNat]
+  next => simp [iterNat, empty, Collection.empty]
   next n ih =>
-    simp_all [testNat, Nat.lt_succ_iff_lt_or_eq]; clear ih
+    simp_all [iterNat, Nat.lt_succ_iff_lt_or_eq, concat, Collection.concat]; clear ih
     constructor
     · rintro ⟨h1,h2⟩ i ⟨h2|h3⟩
-      · exact h2 i (Nat.lt_add_one i)
-      · exact h2 i (Nat.lt_succ_of_lt h3)
+      · exact h1 i (Nat.lt_add_one i)
+      · exact h1 i (Nat.lt_succ_of_lt h3)
       · subst i; assumption
-    · exact fun h ↦ ⟨h _ (Or.inr rfl), fun i h2 ↦ h _ (Or.inl h2)⟩
+    · exact fun h ↦ ⟨fun i h2 ↦ h _ (Or.inl h2), h _ (Or.inr rfl)⟩
 
-theorem testAllSplits_spec (n : Nat) P :
-    testAllSplits n P = true ↔ ∀ s1 s2, s1 + s2 = n → P s1 s2 := by
-  rw [testAllSplits, testNat_spec]
+theorem iterAllSplits_spec (n : Nat) P :
+    iterAllSplits n P = true ↔ ∀ s1 s2, s1 + s2 = n → P (s1, s2) := by
+  rw [iterAllSplits, iterNat_spec]
   constructor
   · intro h s1 s2 hs12
     convert h s1 ?lt <;> omega
@@ -247,11 +293,11 @@ theorem testAllSplits_spec (n : Nat) P :
     apply h
     omega
 
-theorem testFreeMagmas_spec (s n : Nat) P :
-  testFreeMagmas s n P = true ↔ ∀ m n', m.forks = s → m.is_canonical n = some n' → P n' m = true := by
-  induction s, n, P using testFreeMagmas.induct
+theorem iterFreeMagmas_spec (s n : Nat) P :
+  iterFreeMagmas s n P = true ↔ ∀ m n', m.forks = s → m.is_canonical n = some n' → P (n', m) = true := by
+  induction s, n, Bool, _, P using iterFreeMagmas.induct
   next n P =>
-    simp (config := {contextual := true}) [testFreeMagmas, testNat_spec, FreeMagma.is_canonical]
+    simp (config := {contextual := true}) [iterFreeMagmas, iterNat_spec, FreeMagma.is_canonical]
     constructor
     · intro h
       rintro _ n' i rfl heq
@@ -268,7 +314,7 @@ theorem testFreeMagmas_spec (s n : Nat) P :
       omega
   next n P s ih2 ih1 =>
     simp (config := {contextual := true}) [testFreeMagmas, FreeMagma.is_canonical,
-      testAllSplits_spec, Option.bind_eq_some]
+      iterAllSplits_spec, Option.bind_eq_some]
     constructor
     · rintro h _ n' l r rfl hadd n'' hcan1 hcan2
       exact ((ih2 _ _ hadd) _ l).mp ((ih1 _ _ hadd).mp (h _ _ hadd) _ _ rfl hcan1) _ _ rfl hcan2
@@ -281,10 +327,44 @@ theorem testFreeMagmas_spec (s n : Nat) P :
       · exact hcan1
       · exact hcan2
 
-theorem testLaws_spec (s : Nat) P :
-  testLaws s P = true ↔ ∀ l : Law.MagmaLaw Nat, l.forks = s → l.is_canonical → P l = true := by
-  unfold testLaws
-  simp [testAllSplits_spec, testFreeMagmas_spec, Decidable.or_iff_not_imp_left]
+theorem testFreeMagmas_spec (s n : Nat) P :
+  testFreeMagmas s n P = true ↔ ∀ m n', m.forks = s → m.is_canonical n = some n' → P n' m = true := by
+  induction s, n, P using testFreeMagmas.induct
+  next n P =>
+    simp (config := {contextual := true}) [testFreeMagmas, iterNat_spec, FreeMagma.is_canonical]
+    constructor
+    · intro h
+      rintro _ n' i rfl heq
+      specialize h i
+      split at heq
+      next hlt => simp_all; apply h; omega
+      next =>
+        split at heq
+        next => simp_all
+        next  => simp_all
+    · intro h i hi
+      apply h _ _ _ rfl
+      split <;> simp
+      omega
+  next n P s ih2 ih1 =>
+    simp (config := {contextual := true}) [testFreeMagmas, FreeMagma.is_canonical,
+      iterAllSplits_spec, Option.bind_eq_some]
+    constructor
+    · rintro h _ n' l r rfl hadd n'' hcan1 hcan2
+      exact ((ih2 _ _ hadd) _ l).mp ((ih1 _ _ hadd).mp (h _ _ hadd) _ _ rfl hcan1) _ _ rfl hcan2
+    · intro h s1 s2 hadd
+      rw [ih1 _ _ hadd]
+      intro l n' hl hcan1
+      rw [ih2 _ _ hadd]
+      intro r n'' hr hcan2
+      apply h _ n'' l r rfl (by simp [*])
+      · exact hcan1
+      · exact hcan2
+
+theorem iterLaws_spec (s : Nat) P :
+  iterLaws s P = true ↔ ∀ l : Law.MagmaLaw Nat, l.forks = s → l.is_canonical → P l = true := by
+  unfold iterLaws
+  simp [iterAllSplits_spec, iterFreeMagmas_spec, Decidable.or_iff_not_imp_left, Collection.empty]
   constructor
   · rintro h ⟨l, r⟩ hs hcan
     simp [Law.MagmaLaw.is_canonical] at hcan
@@ -306,7 +386,7 @@ theorem testLaws_spec (s : Nat) P :
 
 theorem testLawsUpto_spec (s : Nat) P :
     testLawsUpto s P = true ↔ ∀ l : Law.MagmaLaw Nat, l.forks ≤ s → l.is_canonical → P l = true := by
-  simp [testLawsUpto, testLaws_spec, testNat_spec, Nat.lt_succ_iff]
+  simp [testLawsUpto, iterLawsUpto, iterLaws_spec, iterNat_spec, Nat.lt_succ_iff]
   constructor
   · intro h i his hcanon
     apply h _ his _ rfl hcanon
